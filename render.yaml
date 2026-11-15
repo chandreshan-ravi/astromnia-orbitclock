@@ -1,0 +1,19 @@
+# Render Blueprint: New > Blueprint > pick this repository.
+services:
+  - type: web
+    name: orbitclock
+    runtime: docker
+    plan: starter            # a persistent disk needs a paid instance; the free plan loses saved readings on restart
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: ACCESS_CODE     # the code you give testers
+        sync: false
+      - key: ADMIN_CODE      # your own coordinator code (keep it private)
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+    disk:
+      name: orbitclock-data
+      mountPath: /var/data
+      sizeGB: 1

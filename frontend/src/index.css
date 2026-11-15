@@ -1,0 +1,11 @@
+
+html {
+  background: #06121c;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
