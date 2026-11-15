@@ -8,6 +8,9 @@ Environment variables
   ADMIN_CODE            code for the study coordinator: can change Setup, delete any reading, download feedback.
   SESSION_SECRET        random string used to sign session cookies (required when ACCESS_CODE is set).
   FRONTEND_DIST         built front end (default ../frontend/dist)
+  BACKUP_GITHUB_TOKEN   optional: GitHub token with Contents read/write on BACKUP_GITHUB_REPO, for the off-site backup
+  BACKUP_GITHUB_REPO    optional: owner/name of the repository that keeps the off-site backup
+  BACKUP_GITHUB_BRANCH  optional: branch for the off-site backup (default data-backup)
 
 Run locally:   .venv/bin/python server.py
 """
@@ -41,16 +44,23 @@ AUTH_REQUIRED = bool(ACCESS_CODE or ADMIN_CODE)
 if AUTH_REQUIRED and not SECRET:
     raise SystemExit("SESSION_SECRET must be set when ACCESS_CODE or ADMIN_CODE is set.")
 
-# ----------------------------------------------------------------------------- data folder (seed on first run)
+# ----------------------------------------------------------------------------- data folder
+# First start (empty folder): restore the off-site backup if one is configured, otherwise copy the seed data.
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-if not (DATA_DIR / "readings.csv").exists() and not (DATA_DIR / "settings.json").exists() and SEED_DIR.exists():
-    for f in SEED_DIR.iterdir():
-        if f.is_file():
-            shutil.copy2(f, DATA_DIR / f.name)
-
-from orbitclock import store  # noqa: E402
+from orbitclock import backup, store  # noqa: E402
 
 store.DATA_DIR = DATA_DIR
+DATA_SOURCE = "existing data"
+if not (DATA_DIR / "readings.csv").exists() and not (DATA_DIR / "settings.json").exists():
+    if backup.restore_offsite():
+        DATA_SOURCE = "restored from the off-site backup"
+    elif SEED_DIR.exists():
+        for f in SEED_DIR.iterdir():
+            if f.is_file():
+                shutil.copy2(f, DATA_DIR / f.name)
+        DATA_SOURCE = "seed data"
+backup.install()
+print(f"OrbitClock data: {DATA_DIR} ({DATA_SOURCE}); off-site backup {'on' if backup.offsite['enabled'] else 'off'}", flush=True)
 import api  # noqa: E402  (routes for options / mission / sensitivity / setup / measure / records)
 
 signer = URLSafeTimedSerializer(SECRET or "local-dev", salt="orbitclock-session")
@@ -71,7 +81,8 @@ def session_of(scope) -> dict | None:
 PUBLIC = {"/api/session", "/api/login", "/api/logout", "/api/health"}
 ADMIN_ONLY = {("POST", "/api/setup/calibration"), ("DELETE", "/api/setup/calibration"),
               ("POST", "/api/setup/calibration/example"), ("POST", "/api/setup/settings"),
-              ("GET", "/api/feedback.csv")}
+              ("GET", "/api/feedback.csv"), ("GET", "/api/backups"), ("GET", "/api/backups/download"),
+              ("POST", "/api/backups/restore"), ("POST", "/api/backups/snapshot")}
 
 
 class AuthMiddleware:
@@ -162,6 +173,7 @@ async def feedback(request):
                         tester=request.state.tester, role=request.state.role, page=str(body.get("page", ""))[:80],
                         kind=str(body.get("kind", ""))[:40], message=msg[:5000],
                         user_agent=request.headers.get("user-agent", "")[:200]))
+    store.notify("feedback")
     return JSONResponse({"ok": True})
 
 

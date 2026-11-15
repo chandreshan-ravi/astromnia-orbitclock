@@ -15,6 +15,7 @@ app's first three tabs, using the same analysis code and the same data/ folder.
 from __future__ import annotations
 
 import math
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -24,7 +25,7 @@ import pandas as pd
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from . import store
+from . import backup, store
 from .analysis import (ABOVE_RANGE, BELOW_LOQ, CONC_UNITS, CURRENT_UNITS, INSUFFICIENT, NOT_DETECTED, InputError,
                        current_factor, detection_limits, dilution_factor, find_peak, parse_calibration, parse_sample,
                        quantify, range_flag, read_csv, to_pg_per_ml)
@@ -268,8 +269,79 @@ async def delete_record(request):
         row = df[df["reading_id"] == rid]
         if row.empty or str(row.iloc[0]["entered_by"]) != _tester(request):
             return JSONResponse(dict(error="You can delete only readings you entered."), status_code=403)
-    store.delete_reading(rid)
+    if not store.delete_reading(rid, deleted_by=_tester(request)):
+        return JSONResponse(dict(error=f"Reading {rid} was not found."), status_code=404)
     return await get_records(request)
+
+
+def _bin_rows() -> list[dict]:
+    df = store.load_deleted().sort_values("deleted_at", ascending=False)
+    return [{k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in r.items()} for r in df.to_dict("records")]
+
+
+async def get_deleted(request):
+    """The recycle bin: readings deleted from History, newest first."""
+    return JSONResponse(clean(dict(rows=_bin_rows(), tester=_tester(request), can_purge=_role(request) == "admin")))
+
+
+async def restore_record(request):
+    rid = int(request.path_params["rid"])
+    if _role(request) != "admin":
+        b = store.load_deleted()
+        row = b[b["reading_id"] == rid]
+        if row.empty or _tester(request) not in (str(row.iloc[0]["entered_by"]), str(row.iloc[0]["deleted_by"])):
+            return JSONResponse(dict(error="You can restore only readings you entered or deleted."), status_code=403)
+    if not store.restore_reading(rid):
+        return JSONResponse(dict(error=f"Reading {rid} is not in Recently deleted."), status_code=404)
+    return await get_deleted(request)
+
+
+async def purge_record(request):
+    if _role(request) != "admin":
+        return JSONResponse(dict(error="Only the study coordinator can delete readings permanently."), status_code=403)
+    store.purge_reading(int(request.path_params["rid"]))
+    return await get_deleted(request)
+
+
+# ----------------------------------------------------------------------------- backups (coordinator)
+async def get_backups(request):
+    return JSONResponse(clean(backup.status()))
+
+
+async def download_backup(request):
+    name = request.query_params.get("name")
+    data = backup.snapshot_bytes(name) if name else backup.current_zip()
+    if data is None:
+        return JSONResponse(dict(error="Backup not found."), status_code=404)
+    fname = name or f"orbitclock_backup_{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.zip"
+    return Response(data, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+
+async def restore_backup(request):
+    ctype = request.headers.get("content-type", "")
+    try:
+        if ctype.startswith("multipart/"):
+            form = await request.form()
+            up = form.get("file")
+            if up is None:
+                return JSONResponse(dict(error="Choose a backup .zip file."), status_code=400)
+            data = await up.read()
+        else:
+            name = (await request.json()).get("name", "")
+            data = backup.snapshot_bytes(name)
+            if data is None:
+                return JSONResponse(dict(error="Backup not found."), status_code=404)
+        res = backup.restore_zip(data)
+    except (ValueError, zipfile.BadZipFile) as e:
+        return JSONResponse(dict(error=str(e) if isinstance(e, ValueError) else "That file is not a valid .zip backup."), status_code=400)
+    return JSONResponse(clean(dict(backup.status(), restored=res)))
+
+
+async def snapshot_now(request):
+    backup.snapshot("manual")
+    if backup.offsite["enabled"]:
+        backup.push_offsite()
+    return JSONResponse(clean(backup.status()))
 
 
 async def records_csv(request):
@@ -294,4 +366,11 @@ routes = [
     Route("/api/records", get_records),
     Route("/api/records.csv", records_csv),
     Route("/api/records/{rid:int}", delete_record, methods=["DELETE"]),
+    Route("/api/records/deleted", get_deleted),
+    Route("/api/records/deleted/{rid:int}/restore", restore_record, methods=["POST"]),
+    Route("/api/records/deleted/{rid:int}", purge_record, methods=["DELETE"]),
+    Route("/api/backups", get_backups),
+    Route("/api/backups/download", download_backup),
+    Route("/api/backups/restore", restore_backup, methods=["POST"]),
+    Route("/api/backups/snapshot", snapshot_now, methods=["POST"]),
 ]

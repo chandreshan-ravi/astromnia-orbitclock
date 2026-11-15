@@ -182,6 +182,8 @@ export function SetupPage({ onChanged }: { onChanged: () => void }) {
           </div>
         </Panel>
       )}
+
+      <BackupsPanel canEdit={info.can_edit} />
     </>
   );
 }
@@ -366,7 +368,7 @@ export function MeasurePage({ crewIds, onSaved, goSetup, dataVersion }: { crewId
 }
 
 // ----------------------------------------------------------------------------- RECORDS
-export function RecordsPage({ onChanged, mode }: { onChanged: () => void; mode: "history" | "trends" }) {
+function RecordsView({ onChanged, mode }: { onChanged: () => void; mode: "history" | "trends" }) {
   const [info, setInfo] = useState<RecordsInfo | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [hidden, setHidden] = useState<string[]>([]);
@@ -389,7 +391,7 @@ export function RecordsPage({ onChanged, mode }: { onChanged: () => void; mode: 
   const toggleAll = () => setPicked(allOn ? picked.filter((p) => !visibleIds.includes(p)) : [...new Set([...picked, ...visibleIds])]);
   const delPicked = async () => {
     const skip = pickedRows.length - deletable.length;
-    if (!confirm(`Delete ${deletable.length} reading(s)?${skip ? ` ${skip} selected reading(s) entered by others will be kept.` : ""} This cannot be undone.`)) return;
+    if (!confirm(`Delete ${deletable.length} reading(s)?${skip ? ` ${skip} selected reading(s) entered by others will be kept.` : ""} They move to Recently deleted, where they can be restored.`)) return;
     setBusy(true);
     let last: RecordsInfo | null = null;
     try {
@@ -399,7 +401,7 @@ export function RecordsPage({ onChanged, mode }: { onChanged: () => void; mode: 
     setPicked([]); setBusy(false); onChanged();
   };
   const del = (id: number) => {
-    if (!confirm(`Delete reading ${id}? This cannot be undone.`)) return;
+    if (!confirm(`Delete reading ${id}? It moves to Recently deleted, where it can be restored.`)) return;
     call<RecordsInfo>(`/api/records/${id}`, { method: "DELETE" }).then((i) => { setInfo(i); onChanged(); }).catch((e) => setErr(String(e.message ?? e)));
   };
 
@@ -681,5 +683,144 @@ function TrendChart({ rows, crews, colour, loq, refLow, refHigh, launch }: {
         </ResponsiveContainer>
       </div>
     </div>
+  );
+}
+
+// ----------------------------------------------------------------------------- HISTORY tabs + recycle bin
+type DeletedInfo = { rows: (Reading & { deleted_at: string | null; deleted_by: string | null })[]; tester: string; can_purge: boolean };
+
+export function RecordsPage({ onChanged, mode }: { onChanged: () => void; mode: "history" | "trends" }) {
+  const [tab, setTab] = useState<"saved" | "deleted">("saved");
+  const [bin, setBin] = useState<DeletedInfo | null>(null);
+  const [version, setVersion] = useState(0);
+  const loadBin = () => call<DeletedInfo>("/api/records/deleted").then(setBin).catch(() => setBin(null));
+  useEffect(() => { if (mode === "history") loadBin(); }, [mode, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const changed = () => { setVersion((v) => v + 1); onChanged(); };
+  if (mode === "trends") return <RecordsView mode="trends" onChanged={onChanged} />;
+  return (
+    <>
+      <div className="history-tabs" role="tablist">
+        <button role="tab" aria-selected={tab === "saved"} className={tab === "saved" ? "on" : ""} onClick={() => setTab("saved")}>SAVED READINGS</button>
+        <button role="tab" aria-selected={tab === "deleted"} className={tab === "deleted" ? "on" : ""} onClick={() => setTab("deleted")}>
+          RECENTLY DELETED{bin ? ` (${bin.rows.length})` : ""}</button>
+      </div>
+      {tab === "saved" ? <RecordsView key={`v${version}`} mode="history" onChanged={changed} /> : <DeletedView info={bin} onChanged={changed} setInfo={setBin} />}
+    </>
+  );
+}
+
+function DeletedView({ info, setInfo, onChanged }: { info: DeletedInfo | null; setInfo: (i: DeletedInfo) => void; onChanged: () => void }) {
+  const [err, setErr] = useState<string | null>(null);
+  if (!info) return <div className="notice subtle">Loading recently deleted readings…</div>;
+  const act = (path: string, method: string) =>
+    call<DeletedInfo>(path, { method }).then((i) => { setInfo(i); setErr(null); onChanged(); }).catch((e) => setErr(String(e.message ?? e)));
+  const canRestore = (r: DeletedInfo["rows"][number]) => info.can_purge || r.entered_by === info.tester || r.deleted_by === info.tester;
+  return (
+    <Panel n="H2" title="RECENTLY DELETED" tag={`${info.rows.length} READING(S) THAT CAN BE RESTORED`}>
+      <div className="lab-body">
+        <p className="lab-help">Deleting a reading in History moves it here instead of erasing it. <b>Restore</b> puts it back with its original ID. {info.can_purge ? "Delete permanently empties it from this list; it stays in the backup snapshots in Settings." : "Testers can restore readings they entered or deleted; only the study coordinator can delete permanently."}</p>
+        {err && <div className="notice error">{err}</div>}
+        {!info.rows.length ? <div className="notice subtle">Nothing has been deleted.</div> : (
+          <div className="plan-table-wrap flush">
+            <table className="plan-table">
+              <thead><tr><th>ID</th><th>CREW</th><th>PHASE</th><th>SAMPLED</th><th>SALIVA (pg/mL)</th><th>ENTERED BY</th><th>DELETED</th><th>DELETED BY</th><th /></tr></thead>
+              <tbody>
+                {info.rows.map((r) => (
+                  <tr key={r.reading_id}>
+                    <td>{r.reading_id}</td><td>{r.crew_id}</td><td>{r.mission_phase}</td><td>{r.sampled_at?.replace("T", " ") ?? "—"}</td>
+                    <td>{r.saliva_pg_ml !== null ? fmt(r.saliva_pg_ml) : "—"}</td><td>{r.entered_by ?? "—"}</td>
+                    <td>{r.deleted_at ? new Date(r.deleted_at).toLocaleString() : "—"}</td><td>{r.deleted_by ?? "—"}</td>
+                    <td className="row-actions">
+                      {canRestore(r) && <button className="lab-button small" onClick={() => act(`/api/records/deleted/${r.reading_id}/restore`, "POST")}>RESTORE</button>}
+                      {info.can_purge && <button className="lab-button danger small" onClick={() => confirm(`Delete reading ${r.reading_id} permanently? It will remain only in backup snapshots.`) && act(`/api/records/deleted/${r.reading_id}`, "DELETE")}>DELETE PERMANENTLY</button>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+// ----------------------------------------------------------------------------- SETTINGS: backups
+type Snapshot = { name: string; size: number; created: string | null; reason: string | null; readings: number | null; deleted: number | null };
+type BackupInfo = {
+  snapshots: Snapshot[]; readings: number; deleted: number;
+  offsite: { enabled: boolean; repo: string; branch: string; last_ok: string | null; last_error: string | null };
+};
+const REASON: Record<string, string> = {
+  "reading-saved": "reading saved", "reading-deleted": "reading deleted", "reading-restored": "reading restored", "reading-purged": "deleted permanently",
+  settings: "settings changed", calibration: "calibration changed", "calibration-removed": "calibration removed", feedback: "feedback sent",
+  startup: "server started", manual: "manual backup", restored: "backup restored", "before-restore": "before a restore",
+};
+
+function BackupsPanel({ canEdit }: { canEdit: boolean }) {
+  const [info, setInfo] = useState<BackupInfo | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => { if (canEdit) call<BackupInfo>("/api/backups").then(setInfo).catch((e) => setErr(String(e.message ?? e))); }, [canEdit]);
+  const run = (p: Promise<BackupInfo & { restored?: { readings: number; deleted: number } }>, done?: (i: BackupInfo & { restored?: { readings: number } }) => void) => {
+    setBusy(true); setErr(null); setMsg(null);
+    p.then((i) => { setInfo(i); done?.(i); }).catch((e) => setErr(String(e.message ?? e))).finally(() => setBusy(false));
+  };
+  const restored = (i: { restored?: { readings: number } }) => {
+    setMsg(`Restored: ${i.restored?.readings ?? 0} reading(s). Reloading…`);
+    window.setTimeout(() => window.location.reload(), 1200);
+  };
+  return (
+    <Panel n="S4" title="BACKUPS & RESTORE" tag="EVERY CHANGE IS SAVED AS A SNAPSHOT">
+      <div className="lab-body">
+        {!canEdit ? (
+          <p className="lab-help">Every change to the shared data is backed up automatically. The study coordinator can restore an earlier version here.</p>
+        ) : !info ? <div className="notice subtle">{err ?? "Loading backups…"}</div> : (
+          <>
+            <p className="lab-help">After every change (a reading saved or deleted, Settings or the calibration changed) the server keeps a snapshot of all data; the newest 100 are kept. Restoring one first snapshots the current data, so a restore can be undone too.</p>
+            <div className={`notice ${info.offsite.enabled && !info.offsite.last_error ? "ok" : ""}`}>
+              {info.offsite.enabled
+                ? info.offsite.last_error
+                  ? <><TriangleAlert size={14} /> Off-site backup to GitHub ({info.offsite.repo}, branch {info.offsite.branch}) failed: {info.offsite.last_error}</>
+                  : <><CircleCheck size={14} /> Off-site backup on: copied to GitHub ({info.offsite.repo}, branch <b>{info.offsite.branch}</b>){info.offsite.last_ok ? `, last at ${new Date(info.offsite.last_ok).toLocaleString()}` : ", first copy pending"}. If the server's disk is ever wiped, the data comes back from there on the next start.</>
+                : <><TriangleAlert size={14} /> Off-site backup is off: snapshots live on the server's own disk. Download a backup regularly, or set BACKUP_GITHUB_TOKEN and BACKUP_GITHUB_REPO on the host to copy the data to GitHub after every change.</>}
+            </div>
+            <div className="lab-actions">
+              <a className="lab-button primary" href="/api/backups/download" download><Download size={13} /> DOWNLOAD FULL BACKUP NOW</a>
+              <button className="lab-button" disabled={busy} onClick={() => run(call("/api/backups/snapshot", { method: "POST" }), () => setMsg("Snapshot saved."))}>SAVE A SNAPSHOT NOW</button>
+              <FilePick label="RESTORE FROM A BACKUP FILE" accept=".zip" onFile={(f) => {
+                if (!confirm(`Replace all current data with the backup in ${f.name}? The current data is snapshotted first.`)) return;
+                const d = new FormData(); d.append("file", f);
+                run(call("/api/backups/restore", { method: "POST", body: d }), restored);
+              }} />
+            </div>
+            {msg && <p className="lab-ok"><CircleCheck size={13} /> {msg}</p>}
+            {err && <div className="notice error">{err}</div>}
+            <p className="lab-meta">Now: {info.readings} saved reading(s), {info.deleted} in Recently deleted.</p>
+            <div className="plan-table-wrap flush">
+              <table className="plan-table">
+                <thead><tr><th>SNAPSHOT TIME</th><th>AFTER</th><th>READINGS</th><th>DELETED</th><th /></tr></thead>
+                <tbody>
+                  {(showAll ? info.snapshots : info.snapshots.slice(0, 8)).map((b) => (
+                    <tr key={b.name}>
+                      <td>{b.created ? new Date(b.created).toLocaleString() : b.name}</td><td>{REASON[b.reason ?? ""] ?? b.reason ?? "—"}</td>
+                      <td>{b.readings ?? "—"}</td><td>{b.deleted ?? "—"}</td>
+                      <td className="row-actions">
+                        <a className="lab-button small" href={`/api/backups/download?name=${encodeURIComponent(b.name)}`} download><Download size={12} /> DOWNLOAD</a>
+                        <button className="lab-button small" disabled={busy} onClick={() => confirm(`Restore the data as it was at ${b.created ? new Date(b.created).toLocaleString() : b.name} (${b.readings ?? 0} readings)? The current data is snapshotted first.`)
+                          && run(call("/api/backups/restore", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: b.name }) }), restored)}>RESTORE</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {info.snapshots.length > 8 && <button className="lab-button small" onClick={() => setShowAll(!showAll)}>{showAll ? "SHOW FEWER" : `SHOW ALL ${info.snapshots.length}`}</button>}
+          </>
+        )}
+      </div>
+    </Panel>
   );
 }

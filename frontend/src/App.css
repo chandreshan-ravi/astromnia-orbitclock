@@ -752,3 +752,9 @@ fieldset.bare:disabled input { opacity: .6; }
 .plan-table td.pick input, .plan-table th.pick input { width: 16px; height: 16px; accent-color: #58e2cc; cursor: pointer; }
 .plan-table tr.picked td { background: rgba(88, 226, 204, .08); }
 .trend-scroll { overflow-x: auto; }
+
+/* ---------------------------------------------------------------- history tabs, recycle bin, backups */
+.history-tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.history-tabs button { font: 600 11px Inter, sans-serif; letter-spacing: .08em; padding: 8px 14px; border-radius: 6px; border: 1px solid #28515d; background: #0a1b26; color: #8aa8b2; cursor: pointer; }
+.history-tabs button.on { border-color: #58e2cc; color: #e8f6f8; background: rgba(88, 226, 204, .1); }
+.plan-table td.row-actions { white-space: nowrap; display: flex; gap: 6px; }

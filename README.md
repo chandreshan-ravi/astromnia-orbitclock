@@ -88,6 +88,15 @@ Tests: `cd backend && .venv/bin/python -m pytest -q tests`.
 | `SESSION_SECRET` | — | required when a code is set; signs the 30-day sign-in cookie |
 | `ORBITCLOCK_DATA_DIR` | `backend/data` (`/var/data` in Docker) | calibration, settings, readings, feedback |
 | `PORT` / `HOST` | 8510 / 127.0.0.1 (10000 / 0.0.0.0 in Docker) | where the server listens |
+| `BACKUP_GITHUB_TOKEN` | unset | optional off-site backup: a fine-grained GitHub token with **Contents: read and write** on `BACKUP_GITHUB_REPO` |
+| `BACKUP_GITHUB_REPO` | unset | `owner/name` of the repository that keeps the backup (for example this one) |
+| `BACKUP_GITHUB_BRANCH` | `data-backup` | branch for the backup; the data files go in `live-data/` |
+
+## Keeping the data safe
+
+- **Recently deleted**: deleting a reading in History moves it to a recycle bin; anyone who entered or deleted it (or the coordinator) can restore it. Only the coordinator can delete permanently.
+- **Snapshots**: after every change the server zips all data files into `<data>/backups/` (newest 100 kept). In **Settings → Backups & restore** the coordinator can download any snapshot, download a full backup, restore a snapshot, or restore from a downloaded backup file. A restore snapshots the current data first, so it can be undone.
+- **Off-site copy** (recommended on Render): set `BACKUP_GITHUB_TOKEN` and `BACKUP_GITHUB_REPO`. About 20 s after each change the data files are pushed to the `data-backup` branch. If the server ever starts with an empty data folder (no persistent disk, a new service, a wiped disk) it restores from that branch before falling back to the seed data. Redeploying with new code never touches the data.
 
 ## Melatonin plan rules
 
