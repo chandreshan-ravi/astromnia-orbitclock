@@ -182,7 +182,7 @@ function App() {
           {auth.role === "admin" && <a className="sidebar-link icon" href="/api/feedback.csv" download><Download size={14} /><span>Download feedback</span></a>}
           <button className="sidebar-link icon" onClick={() => setModal("about")}><Orbit size={14} /><span>About, sources &amp; credits</span></button>
           {auth.required && <button className="sidebar-link icon" onClick={signOut}><LogOut size={14} /><span>Sign out</span></button>}
-          <div className="ai-label">Research prototype, not a medical device · Software built with AI assistance</div>
+          <div className="ai-label">Research prototype, not a medical device · Developed with AI assistance (Claude Code), see About</div>
         </div>
       </aside>
 

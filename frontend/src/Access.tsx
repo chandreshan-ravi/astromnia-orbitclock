@@ -58,7 +58,7 @@ function Login({ onDone }: { onDone: (s: Session) => void }) {
         </label>
         {err && <div className="notice error">{err}</div>}
         <button className="lab-button primary wide" disabled={busy || !name.trim() || !code || !accepted}><LogIn size={14} /> SIGN IN</button>
-        <small className="login-foot">{VERSION} · built with AI assistance</small>
+        <small className="login-foot">{VERSION} · AI-assisted software (Claude Code), see About</small>
       </form>
     </div>
   );
@@ -161,10 +161,12 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
           <ul>{ASSET_CREDITS.map((c) => <li key={c.asset}><b>{c.asset}</b>: {c.credit}</li>)}</ul>
         </>}
 
-        <h3>USE OF AI</h3>
+        <h3>AI DECLARATION</h3>
         <ul>
-          <li>The software (front end, analysis engine and server) was developed with help from AI coding assistants, including Claude Code (Anthropic). The team reviewed and tested the results.</li>
-          <li>AI-generated images, if any, are labelled "AI-generated" where they appear.</li>
+          <li><b>AI tool used</b>: Claude Code (Anthropic), an AI coding assistant. No other AI tools; no AI-generated images, video or audio.</li>
+          <li><b>Made by the team without AI</b>: the DPV sensor work and lab measurements, the DPV result calculation (calibration, peak, LOD/LOQ, concentration), the mission simulation, the 3D brain, the ASTROMNIA interface design and logo.</li>
+          <li><b>Developed with Claude Code</b>: the body-clock engine and melatonin plan rules (to the team's protocol), connecting the engine to the interface, the laboratory pages around the team's calculation, the Results screen, the live ISS light-dark page, the tester sign-in, tests and deployment. The team reviewed and tested all of it.</li>
+          <li>Full declaration: <a href="https://github.com/chandreshan-ravi/astromnia-orbitclock/blob/main/AI_DECLARATION.md" target="_blank" rel="noreferrer">AI_DECLARATION.md</a>.</li>
         </ul>
 
         <p className="lab-help">Research prototype, not a medical device. Melatonin doses are suggestions for flight-surgeon approval and must not be used for treatment. Not affiliated with or endorsed by any space agency.</p>

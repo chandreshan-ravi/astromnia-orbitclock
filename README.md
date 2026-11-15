@@ -14,7 +14,7 @@ React + TypeScript front end (`frontend/`) and a Python engine and API (`backend
 
 > Research prototype, not a medical device. Melatonin plans are suggestions for flight-surgeon approval. Not affiliated with or endorsed by NASA or any space agency.
 
-**Live app:** _(add the deployed link)_
+**Live app:** https://astromnia-melatonin.onrender.com/ · **AI declaration:** [AI_DECLARATION.md](AI_DECLARATION.md)
 
 [![CI](https://github.com/chandreshan-ravi/astromnia-orbitclock/actions/workflows/ci.yml/badge.svg)](https://github.com/chandreshan-ravi/astromnia-orbitclock/actions/workflows/ci.yml)
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/chandreshan-ravi/astromnia-orbitclock)
@@ -36,7 +36,7 @@ React + TypeScript front end (`frontend/`) and a Python engine and API (`backend
 
 - No NASA logos, flags or mission identifiers anywhere in the app (the NASA logo background and an unused astronaut model were removed).
 - Challenge: *Create Health Monitoring Software for Astronauts on Space Missions* (Space Apps 2026). NASA resources used, from the challenge's Resources tab: NASA Human Research Program, Risk from Inadequate Sleep and Irregular Schedules (and its Human Research Roadmap entry), and Risks / 5 Hazards of Human Spaceflight. They are shown on **Results** ("Why monitor the body clock") and in **About, sources & credits**; edit them in `frontend/src/Access.tsx` (`NASA_RESOURCES`). Image/model credits go in `ASSET_CREDITS` in the same file.
-- Use of AI is stated in the app (About panel, sign-in screen, sidebar).
+- Use of AI is declared in [AI_DECLARATION.md](AI_DECLARATION.md) and in the app (About panel, sign-in screen, sidebar).
 - Judges need the deployed link (see below), not the GitHub repository.
 
 Everyone shares one dataset. On the first start the server copies `backend/seed_data/` (the calibration and readings collected so far) into its data folder; after that it never overwrites it.
