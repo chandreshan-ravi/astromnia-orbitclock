@@ -16,6 +16,9 @@ React + TypeScript front end (`frontend/`) and a Python engine and API (`backend
 
 **Live app:** _(add the deployed link)_
 
+[![CI](https://github.com/chandreshan-ravi/astromnia-orbitclock/actions/workflows/ci.yml/badge.svg)](https://github.com/chandreshan-ravi/astromnia-orbitclock/actions/workflows/ci.yml)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/chandreshan-ravi/astromnia-orbitclock)
+
 ## Features
 
 | Page | Who | What |
@@ -43,15 +46,14 @@ Everyone shares one dataset. On the first start the server copies `backend/seed_
 Needs the GitHub CLI (`gh`) signed in once (`gh auth login --web`). From this folder:
 
     git add -A && git commit -m "Describe the change"
-    gh repo create astromnia-orbitclock --public --source . --push     # first time only
     git push                                                           # afterwards
 
 Every push runs the tests and the front-end build on GitHub Actions (`.github/workflows/ci.yml`) and, once Render is connected, redeploys the live app.
 
 ## Put it online (Render)
 
-1. Push this repository to GitHub (see "Publish from this computer" below).
-2. On render.com: **New → Blueprint**, pick the repository. `render.yaml` creates one web service from the `Dockerfile` with a 1 GB persistent disk at `/var/data`.
+1. The code is on GitHub: https://github.com/chandreshan-ravi/astromnia-orbitclock (push changes as described below).
+2. Click **Deploy to Render** at the top of this README (or on render.com: **New → Blueprint**, pick the repository). `render.yaml` creates one web service from the `Dockerfile` with a 1 GB persistent disk at `/var/data`.
 3. When asked, set:
    - `ACCESS_CODE`: the code you give testers
    - `ADMIN_CODE`: your own coordinator code, kept private
