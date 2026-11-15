@@ -751,3 +751,4 @@ fieldset.bare:disabled input { opacity: .6; }
 .plan-table th.pick, .plan-table td.pick { width: 34px; text-align: center; }
 .plan-table td.pick input, .plan-table th.pick input { width: 16px; height: 16px; accent-color: #58e2cc; cursor: pointer; }
 .plan-table tr.picked td { background: rgba(88, 226, 204, .08); }
+.trend-scroll { overflow-x: auto; }

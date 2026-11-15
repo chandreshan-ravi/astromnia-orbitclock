@@ -2,8 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, CircleCheck, Download, Droplet, Package, Pill, Timer, TriangleAlert, Upload, Zap } from "lucide-react";
 import {
-  CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart,
-  Tooltip, XAxis, YAxis, ZAxis
+  CartesianGrid, ComposedChart, Legend, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Scatter,
+  Tooltip, XAxis, YAxis
 } from "recharts";
 import { CREW_COLOURS, type Mission, type Row } from "./api";
 import { NASA_RESOURCES, unauthorized } from "./Access";
@@ -42,7 +42,7 @@ type Reading = {
   saliva_pg_ml: number | null; reference_flag: string | null; data_origin: string; notes: string | null; sample_file: string | null;
   entered_by: string | null;
 };
-type RecordsInfo = { rows: Reading[]; loq_saliva_pg: number | null; ref_low: number | null; ref_high: number | null; tester: string; can_delete_all: boolean };
+type RecordsInfo = { rows: Reading[]; loq_saliva_pg: number | null; ref_low: number | null; ref_high: number | null; launch_date?: string | null; tester: string; can_delete_all: boolean };
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
@@ -380,7 +380,6 @@ export function RecordsPage({ onChanged, mode }: { onChanged: () => void; mode: 
   const view = info.rows.filter((r) => !hidden.includes(String(r.crew_id)));
   const loq = info.loq_saliva_pg;
   const colour = (c: string) => CREW_COLOURS[crews.indexOf(c) % CREW_COLOURS.length];
-  const t = (r: Reading) => (r.sampled_at ? new Date(r.sampled_at).getTime() : NaN);
   const canDelete = (r: Reading) => info.can_delete_all || r.entered_by === info.tester;
   const visibleIds = view.map((r) => r.reading_id);
   const pickedRows = info.rows.filter((r) => picked.includes(r.reading_id));
@@ -417,31 +416,11 @@ export function RecordsPage({ onChanged, mode }: { onChanged: () => void; mode: 
           ))}
           <a className="lab-button" href="/api/records.csv" download><Download size={13} /> DOWNLOAD CSV</a>
         </div>
-        {mode === "trends" && <div className="chart-area" style={{ height: 340 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <ScatterChart margin={{ top: 14, right: 20, left: 4, bottom: 10 }}>
-              <CartesianGrid stroke="#1b3542" strokeDasharray="3 5" />
-              <XAxis dataKey="t" type="number" scale="time" domain={["dataMin - 3600000", "dataMax + 3600000"]} stroke="#66808b" tick={{ fontSize: 10 }}
-                tickFormatter={(v) => new Date(v).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} />
-              <YAxis dataKey="y" type="number" stroke="#66808b" tick={{ fontSize: 10 }} tickFormatter={(v) => fmt(Number(v), 3)} label={{ value: "saliva pg/mL", angle: -90, position: "insideLeft", fill: "#66808b", fontSize: 10 }} />
-              <ZAxis range={[50, 50]} />
-              <Tooltip contentStyle={TIP} formatter={(v, n) => (n === "t" ? [new Date(Number(v)).toLocaleString(), "sampled"] : [`${fmt(Number(v), 4)} pg/mL`, "saliva"])} />
-              <Legend wrapperStyle={{ fontSize: 10 }} />
-              {loq !== null && <ReferenceLine y={loq} stroke="#5d7883" strokeDasharray="3 4" label={{ value: `saliva LOQ ${fmt(loq)}`, position: "insideTopRight", fill: "#8aa8b2", fontSize: 9 }} />}
-              {info.ref_low != null && <ReferenceLine y={info.ref_low} stroke="#2b4d59" />}
-              {info.ref_high != null && <ReferenceLine y={info.ref_high} stroke="#2b4d59" />}
-              {crews.filter((c) => !hidden.includes(c)).map((c) => (
-                <Scatter key={c} name={c} fill={colour(c)} isAnimationActive={false}
-                  data={view.filter((r) => String(r.crew_id) === c && r.saliva_pg_ml !== null && Number.isFinite(t(r))).map((r) => ({ t: t(r), y: r.saliva_pg_ml }))} />
-              ))}
-              {loq !== null && (
-                <Scatter name="No reportable value (at LOQ)" fill="#0a1b26" stroke="#8aa8b2" shape="triangle" isAnimationActive={false}
-                  data={view.filter((r) => r.saliva_pg_ml === null && Number.isFinite(t(r))).map((r) => ({ t: t(r), y: loq }))} />
-              )}
-            </ScatterChart>
-          </ResponsiveContainer>
-        </div>}
-        {mode === "trends" && <p className="lab-help">Lines mark the saliva LOQ and the reference range from Settings. Triangles are readings with no reportable value. Body-clock timing and the melatonin dose per crew member are on <b>Results</b> and in <b>Mission systems</b> with the RECORDS data source.</p>}
+        {mode === "trends" && (
+          <TrendChart rows={view} crews={crews.filter((c) => !hidden.includes(c))} colour={colour} loq={loq}
+            refLow={info.ref_low} refHigh={info.ref_high} launch={info.launch_date ?? null} />
+        )}
+        {mode === "trends" && <p className="lab-help">Each column is one evening of saliva sampling, read left to right from about 17:00 to midnight; points from the same evening are joined. Shaded bands show the mission phase saved with each reading. Day labels count from the launch date in Settings: L = days before launch, FD = flight day, R+ = days after the last in-flight evening. Dashed lines mark the saliva LOQ and the reference range; triangles are readings with no reportable value.</p>}
         {mode === "history" && <div className="plan-table-wrap flush">
           {mode === "history" && (
             <div className="pick-bar">
@@ -582,5 +561,125 @@ function WhyPanel() {
         {open && <ul className="why-src">{NASA_RESOURCES.map((r) => <li key={r.name}><a href={r.url} target="_blank" rel="noreferrer">{r.name}</a>: {r.use}</li>)}</ul>}
       </div>
     </Panel>
+  );
+}
+
+// ----------------------------------------------------------------------------- TRENDS chart (phase bands)
+const PHASE_ORDER = ["Pre-flight", "In-flight", "Post-flight"];
+const PHASE_STYLE: Record<string, { fill: string; text: string; label: string }> = {
+  "Pre-flight": { fill: "rgba(114,191,255,0.06)", text: "#72bfff", label: "PRE-FLIGHT" },
+  "In-flight": { fill: "rgba(242,189,114,0.11)", text: "#f2bd72", label: "IN FLIGHT" },
+  "Post-flight": { fill: "rgba(180,154,255,0.08)", text: "#b49aff", label: "POST-FLIGHT" },
+};
+const DAY_MS = 86400000;
+const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const dayNum = (s: string) => Math.round(new Date(`${s}T00:00`).getTime() / DAY_MS);
+
+type TPoint = { x: number; y: number; crew: string; time: string; phase: string; evening: string; censored: boolean; value: number | null };
+
+function TrendChart({ rows, crews, colour, loq, refLow, refHigh, launch }: {
+  rows: Reading[]; crews: string[]; colour: (c: string) => string; loq: number | null;
+  refLow: number | null; refHigh: number | null; launch: string | null;
+}) {
+  const model = useMemo(() => {
+    const pts = rows.filter((r) => r.sampled_at && crews.includes(String(r.crew_id))).map((r) => {
+      const t = new Date(r.sampled_at!.replace(" ", "T"));
+      const ev = ymd(new Date(t.getTime() - 12 * 3600000));          // after-midnight samples belong to the previous evening
+      const sinceNoon = (t.getTime() - new Date(`${ev}T12:00`).getTime()) / 3600000;
+      return { r, t, ev, frac: Math.min(1, Math.max(0, (sinceNoon - 5) / 7)) };  // 17:00 → 0, midnight → 1
+    }).filter((p) => !Number.isNaN(p.t.getTime()));
+    const evenings = [...new Set(pts.map((p) => p.ev))].sort();
+    const idx = new Map(evenings.map((e, i) => [e, i]));
+    // phase of an evening = most common phase saved with its readings
+    const phaseOf = new Map<string, string>();
+    for (const e of evenings) {
+      const n: Record<string, number> = {};
+      for (const p of pts) if (p.ev === e) n[p.r.mission_phase] = (n[p.r.mission_phase] ?? 0) + 1;
+      phaseOf.set(e, Object.entries(n).sort((a, b) => b[1] - a[1] || PHASE_ORDER.indexOf(a[0]) - PHASE_ORDER.indexOf(b[0]))[0][0]);
+    }
+    const launchDay = launch ? dayNum(launch) : null;
+    const inflight = evenings.filter((e) => phaseOf.get(e) === "In-flight");
+    const lastIn = inflight.length ? dayNum(inflight[inflight.length - 1]) : null;
+    const ticks = evenings.map((e, i) => {
+      const d = dayNum(e), ph = phaseOf.get(e);
+      let label = "";
+      if (launchDay !== null && ph === "Pre-flight" && d <= launchDay) label = `L${d - launchDay}`;
+      else if (launchDay !== null && ph === "In-flight" && d >= launchDay) label = `FD${d - launchDay + 1}`;
+      else if (ph === "Post-flight" && lastIn !== null && d > lastIn) label = `R+${d - lastIn}`;
+      const date = new Date(`${e}T00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+      return { x: i + 0.5, label: label || date, date: label ? date : "" };
+    });
+    const bands: { phase: string; x1: number; x2: number }[] = [];
+    evenings.forEach((e, i) => {
+      const ph = phaseOf.get(e)!;
+      const last = bands[bands.length - 1];
+      if (last && last.phase === ph) last.x2 = i + 1; else bands.push({ phase: ph, x1: i, x2: i + 1 });
+    });
+    const toPoint = (p: (typeof pts)[number]): TPoint => ({
+      x: idx.get(p.ev)! + 0.12 + 0.76 * p.frac, y: p.r.saliva_pg_ml ?? loq ?? 0, crew: String(p.r.crew_id),
+      time: p.r.sampled_at!.replace("T", " "), phase: p.r.mission_phase, evening: p.ev,
+      censored: p.r.saliva_pg_ml === null, value: p.r.saliva_pg_ml,
+    });
+    const series: { key: string; crew: string; data: TPoint[] }[] = [];
+    for (const c of crews) for (const e of evenings) {
+      const data = pts.filter((p) => String(p.r.crew_id) === c && p.ev === e && p.r.saliva_pg_ml !== null).map(toPoint).sort((a, b) => a.x - b.x);
+      if (data.length) series.push({ key: `${c}|${e}`, crew: c, data });
+    }
+    const censored = pts.filter((p) => p.r.saliva_pg_ml === null).map(toPoint);
+    return { evenings, ticks, bands, series, censored };
+  }, [rows, crews, loq, launch]);
+
+  if (!model.evenings.length) return <div className="notice subtle">No readings with a sampling time for the crew members shown.</div>;
+  const width = Math.max(model.evenings.length * 92, 0);
+  const tipContent = ({ active, payload }: { active?: boolean; payload?: readonly { payload?: TPoint }[] }) => {
+    const p = active ? payload?.[0]?.payload : undefined;
+    if (!p) return null;
+    return (
+      <div style={{ ...TIP, padding: "8px 10px", color: "#d6eeee" }}>
+        <b style={{ color: colour(p.crew) }}>{p.crew}</b> · {p.phase}<br />
+        {p.time}<br />
+        {p.censored ? `below LOQ (< ${fmt(loq)} pg/mL)` : `${fmt(p.value, 4)} pg/mL saliva`}
+      </div>
+    );
+  };
+  return (
+    <div className="trend-scroll">
+      <div className="chart-area" style={{ height: 380, minWidth: width }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart margin={{ top: 26, right: 24, left: 4, bottom: 18 }}>
+            {model.bands.map((b, i) => (
+              <ReferenceArea key={i} x1={b.x1} x2={b.x2} fill={PHASE_STYLE[b.phase]?.fill ?? "transparent"} fillOpacity={1} stroke="none" ifOverflow="visible"
+                label={{ value: PHASE_STYLE[b.phase]?.label ?? b.phase.toUpperCase(), position: "insideTop", fill: PHASE_STYLE[b.phase]?.text ?? "#8aa8b2", fontSize: 10, fontWeight: 700, offset: -18 }} />
+            ))}
+            {model.bands.slice(1).map((b, i) => <ReferenceLine key={`s${i}`} x={b.x1} stroke="#3c5f6c" strokeDasharray="4 4" />)}
+            <CartesianGrid stroke="#1b3542" strokeDasharray="3 5" vertical={false} />
+            <XAxis dataKey="x" type="number" domain={[0, model.evenings.length]} ticks={model.ticks.map((t) => t.x)} interval={0} stroke="#66808b" height={40}
+              tick={(props: { x?: number | string; y?: number | string; payload?: { value: number } }) => {
+                const t = model.ticks.find((k) => Math.abs(k.x - (props.payload?.value ?? -1)) < 1e-6);
+                return (
+                  <g transform={`translate(${props.x},${props.y})`}>
+                    <text y={12} textAnchor="middle" fill="#b9d0d6" fontSize={11} fontWeight={600}>{t?.label}</text>
+                    {t?.date && <text y={26} textAnchor="middle" fill="#66808b" fontSize={9}>{t.date}</text>}
+                  </g>
+                );
+              }} />
+            <YAxis dataKey="y" type="number" stroke="#66808b" tick={{ fontSize: 10 }} tickFormatter={(v) => fmt(Number(v), 3)} domain={[0, "auto"]}
+              label={{ value: "saliva melatonin (pg/mL)", angle: -90, position: "insideLeft", fill: "#66808b", fontSize: 10 }} />
+            <Tooltip content={tipContent} cursor={false} />
+            {loq !== null && <ReferenceLine y={loq} stroke="#5d7883" strokeDasharray="3 4" label={{ value: `LOQ ${fmt(loq)}`, position: "insideBottomRight", fill: "#8aa8b2", fontSize: 9 }} />}
+            {refLow != null && <ReferenceLine y={refLow} stroke="#2e6b62" strokeDasharray="6 4" />}
+            {refHigh != null && <ReferenceLine y={refHigh} stroke="#2e6b62" strokeDasharray="6 4" label={{ value: `reference ${fmt(refLow)}–${fmt(refHigh)}`, position: "insideTopRight", fill: "#5fa89c", fontSize: 9 }} />}
+            {model.series.map((s) => (
+              <Scatter key={s.key} data={s.data} dataKey="y" fill={colour(s.crew)} line={{ stroke: colour(s.crew), strokeWidth: 2 }} lineJointType="monotoneX"
+                isAnimationActive={false} legendType="none" shape={(p: { cx?: number; cy?: number }) => <circle cx={p.cx} cy={p.cy} r={3.6} fill={colour(s.crew)} stroke="#0a1b26" strokeWidth={1} />} />
+            ))}
+            {model.censored.length > 0 && (
+              <Scatter data={model.censored} dataKey="y" isAnimationActive={false} legendType="none"
+                shape={(p: { cx?: number; cy?: number; payload?: TPoint }) => <path d={`M${p.cx},${(p.cy ?? 0) - 5} l5,8 h-10 z`} fill="#0a1b26" stroke={colour(p.payload?.crew ?? "")} strokeWidth={1.4} />} />
+            )}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   );
 }

@@ -256,7 +256,8 @@ async def get_records(request):
     for r in df.sort_values("sampled_at").to_dict("records"):
         rows.append({k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in r.items()})
     return JSONResponse(clean(dict(rows=rows, loq_saliva_pg=st.loq_saliva_pg, ref_low=st.settings.get("ref_low"),
-                                   ref_high=st.settings.get("ref_high"), tester=_tester(request),
+                                   ref_high=st.settings.get("ref_high"), launch_date=st.settings.get("launch_date"),
+                                   tester=_tester(request),
                                    can_delete_all=_role(request) == "admin")))
 
 
