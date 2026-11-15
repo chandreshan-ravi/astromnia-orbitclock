@@ -370,6 +370,8 @@ export function RecordsPage({ onChanged, mode }: { onChanged: () => void; mode: 
   const [info, setInfo] = useState<RecordsInfo | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [hidden, setHidden] = useState<string[]>([]);
+  const [picked, setPicked] = useState<number[]>([]);
+  const [busy, setBusy] = useState(false);
   useEffect(() => { call<RecordsInfo>("/api/records").then(setInfo).catch((e) => setErr(String(e.message ?? e))); }, []);
 
   const crews = useMemo(() => [...new Set((info?.rows ?? []).map((r) => String(r.crew_id)))].sort(), [info]);
@@ -379,6 +381,24 @@ export function RecordsPage({ onChanged, mode }: { onChanged: () => void; mode: 
   const loq = info.loq_saliva_pg;
   const colour = (c: string) => CREW_COLOURS[crews.indexOf(c) % CREW_COLOURS.length];
   const t = (r: Reading) => (r.sampled_at ? new Date(r.sampled_at).getTime() : NaN);
+  const canDelete = (r: Reading) => info.can_delete_all || r.entered_by === info.tester;
+  const visibleIds = view.map((r) => r.reading_id);
+  const pickedRows = info.rows.filter((r) => picked.includes(r.reading_id));
+  const deletable = pickedRows.filter(canDelete);
+  const allOn = visibleIds.length > 0 && visibleIds.every((id) => picked.includes(id));
+  const toggle = (id: number) => setPicked(picked.includes(id) ? picked.filter((p) => p !== id) : [...picked, id]);
+  const toggleAll = () => setPicked(allOn ? picked.filter((p) => !visibleIds.includes(p)) : [...new Set([...picked, ...visibleIds])]);
+  const delPicked = async () => {
+    const skip = pickedRows.length - deletable.length;
+    if (!confirm(`Delete ${deletable.length} reading(s)?${skip ? ` ${skip} selected reading(s) entered by others will be kept.` : ""} This cannot be undone.`)) return;
+    setBusy(true);
+    let last: RecordsInfo | null = null;
+    try {
+      for (const r of deletable) last = await call<RecordsInfo>(`/api/records/${r.reading_id}`, { method: "DELETE" });
+    } catch (e) { setErr(String((e as Error).message ?? e)); }
+    if (last) setInfo(last); else call<RecordsInfo>("/api/records").then(setInfo);
+    setPicked([]); setBusy(false); onChanged();
+  };
   const del = (id: number) => {
     if (!confirm(`Delete reading ${id}? This cannot be undone.`)) return;
     call<RecordsInfo>(`/api/records/${id}`, { method: "DELETE" }).then((i) => { setInfo(i); onChanged(); }).catch((e) => setErr(String(e.message ?? e)));
@@ -423,16 +443,29 @@ export function RecordsPage({ onChanged, mode }: { onChanged: () => void; mode: 
         </div>}
         {mode === "trends" && <p className="lab-help">Lines mark the saliva LOQ and the reference range from Settings. Triangles are readings with no reportable value. Body-clock timing and the melatonin dose per crew member are on <b>Results</b> and in <b>Mission systems</b> with the RECORDS data source.</p>}
         {mode === "history" && <div className="plan-table-wrap flush">
+          {mode === "history" && (
+            <div className="pick-bar">
+              <b>{picked.length ? `${picked.length} SELECTED` : "TICK READINGS TO SELECT THEM"}</b>
+              {picked.length > 0 && <>
+                <a className="lab-button small" href={`/api/records.csv?ids=${picked.join(",")}`} download><Download size={12} /> DOWNLOAD SELECTED</a>
+                <button className="lab-button danger small" disabled={!deletable.length || busy} onClick={delPicked}
+                  title={deletable.length < picked.length ? "Testers can delete only readings they entered" : ""}>
+                  {busy ? "DELETING…" : `DELETE SELECTED (${deletable.length})`}</button>
+                <button className="lab-button small" onClick={() => setPicked([])}>CLEAR</button>
+              </>}
+            </div>
+          )}
           <table className="plan-table">
-            <thead><tr><th>ID</th><th>CREW</th><th>PHASE</th><th>SAMPLED</th><th>STATUS</th><th>SALIVA (pg/mL)</th><th>REFERENCE</th><th>DATA</th><th>ENTERED BY</th><th>FILE</th><th>NOTES</th><th /></tr></thead>
+            <thead><tr><th className="pick"><input type="checkbox" aria-label="Select all shown readings" checked={allOn} onChange={toggleAll} /></th><th>ID</th><th>CREW</th><th>PHASE</th><th>SAMPLED</th><th>STATUS</th><th>SALIVA (pg/mL)</th><th>REFERENCE</th><th>DATA</th><th>ENTERED BY</th><th>FILE</th><th>NOTES</th><th /></tr></thead>
             <tbody>
               {[...view].reverse().map((r) => (
-                <tr key={r.reading_id}>
+                <tr key={r.reading_id} className={picked.includes(r.reading_id) ? "picked" : ""}>
+                  <td className="pick"><input type="checkbox" aria-label={`Select reading ${r.reading_id}`} checked={picked.includes(r.reading_id)} onChange={() => toggle(r.reading_id)} /></td>
                   <td>{r.reading_id}</td><td>{r.crew_id}</td><td>{r.mission_phase}</td><td>{r.sampled_at?.replace("T", " ") ?? "—"}</td>
                   <td><span className={`status-pill ${STATUS_CLS[r.status] ?? "unknown"}`}>{r.status}</span></td>
                   <td>{r.saliva_pg_ml !== null ? fmt(r.saliva_pg_ml) : "—"}</td><td>{r.reference_flag ?? "—"}</td><td>{r.data_origin}</td><td>{r.entered_by ?? "—"}</td>
                   <td className="note">{r.sample_file ?? ""}</td><td className="note">{r.notes ?? ""}</td>
-                  <td>{(info.can_delete_all || r.entered_by === info.tester) && <button className="lab-button danger small" onClick={() => del(r.reading_id)}>DELETE</button>}</td>
+                  <td>{canDelete(r) && <button className="lab-button danger small" onClick={() => del(r.reading_id)}>DELETE</button>}</td>
                 </tr>
               ))}
             </tbody>

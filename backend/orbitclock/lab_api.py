@@ -10,7 +10,7 @@ app's first three tabs, using the same analysis code and the same data/ folder.
                                          (+ save=1, crew_id, mission_phase, sampled_at, notes to save the reading)
   GET    /api/records                    saved readings
   DELETE /api/records/{id}               delete one reading
-  GET    /api/records.csv                download all readings
+  GET    /api/records.csv[?ids=1,2]      download all (or the selected) readings
 """
 from __future__ import annotations
 
@@ -272,8 +272,15 @@ async def delete_record(request):
 
 
 async def records_csv(request):
-    return Response(store.load_readings().to_csv(index=False), media_type="text/csv",
-                    headers={"Content-Disposition": "attachment; filename=orbitclock_readings.csv"})
+    """All readings, or only those listed in ?ids=1,2,3 (the ticked rows in History)."""
+    df = store.load_readings()
+    ids = [int(x) for x in request.query_params.get("ids", "").split(",") if x.strip().isdigit()]
+    name = "orbitclock_readings.csv"
+    if ids:
+        df = df[df["reading_id"].astype(int).isin(ids)]
+        name = f"orbitclock_readings_selected_{len(df)}.csv"
+    return Response(df.to_csv(index=False), media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={name}"})
 
 
 routes = [
